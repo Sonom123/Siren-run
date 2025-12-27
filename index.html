@@ -5,7 +5,7 @@
   <title>Siren Run Game</title>
   <style>
     body { margin:0; background:#000; overflow:hidden; }
-    canvas { display:block; margin:0 auto; background:#222; }
+    canvas { display:block; margin:0 auto; background:#222; touch-action:manipulation; }
     #overlay {
       position:absolute; top:0; left:0; right:0; bottom:0;
       display:flex; align-items:center; justify-content:center;
@@ -15,6 +15,7 @@
     }
     #overlay button {
       padding:20px 40px; font-size:28px; margin-top:20px;
+      width:80%; max-width:300px;
     }
   </style>
 </head>
@@ -31,10 +32,13 @@ const ctx = canvas.getContext("2d");
 const overlay = document.getElementById("overlay");
 const startBtn = document.getElementById("startBtn");
 
+let groundY; // ground image position (top of the ground area)
+
 // Responsive canvas
 function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight * 0.6;
+  groundY = canvas.height - 50; // ground image starts here (50px tall)
 }
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
@@ -74,8 +78,8 @@ const sfx = {
 // Game state
 let gameRunning = false;
 let score = 0;
-let player = { x:150, y:300, vy:0, width:50, height:50 };
-let siren = { x:-200, y:300, vy:0, width:50, height:50 };
+let player = { x:150, y:0, vy:0, width:50, height:50 };
+let siren  = { x:-200, y:0, vy:0, width:50, height:50 };
 let obstacles = [];
 let coins = [];
 let gravity = 0.6;
@@ -96,29 +100,28 @@ function startGame() {
   obstacleHits = 0;
   sirenActive = false;
   warningFlash = 0;
-  player.x = 150; player.y = 300; player.vy = 0;
-  siren.x = -200; siren.y = 300; siren.vy = 0;
+  player.x = 150; player.y = groundY - player.height; player.vy = 0;
+  siren.x = -200; siren.y = groundY - siren.height; siren.vy = 0;
   speed = baseSpeed;
   sfx.sirenSong.loop = true;
-  if(sfx.sirenSong.play) sfx.sirenSong.play().catch(()=>{});
+  if (sfx.sirenSong.play) sfx.sirenSong.play().catch(()=>{});
   requestAnimationFrame(update);
 }
 
 document.addEventListener("keydown", e=>{
-  if(e.code==="Space") { if(!gameRunning) startGame(); else jump(); }
+  if (e.code === "Space") { if (!gameRunning) startGame(); else jump(); }
 });
 canvas.addEventListener("click", ()=>{ if(!gameRunning) startGame(); else jump(); });
-// Touch controls
 canvas.addEventListener("touchstart", e=>{
   e.preventDefault();
-  if(!gameRunning) startGame(); else jump();
+  if (!gameRunning) startGame(); else jump();
 });
 startBtn.addEventListener("click", startGame);
 
 function jump() {
-  if(player.y>=300) {
+  if (player.y >= groundY - player.height) {
     player.vy = -10;
-    if(sfx.jump.play) sfx.jump.play();
+    if (sfx.jump.play) sfx.jump.play();
   }
 }
 
@@ -130,7 +133,7 @@ function spawnObstacle() {
       for (let i = 0; i < count; i++) {
         obstacles.push({
           x: canvas.width + i * 30,
-          y: 310,
+          y: groundY - 40, // obstacle sits on ground
           width: 40,
           height: 40,
           hit: false
@@ -141,29 +144,32 @@ function spawnObstacle() {
 }
 
 function update() {
-  if(!gameRunning) return;
+  if (!gameRunning) return;
 
   speed += speedIncrease;
 
+  // Physics
   player.vy += gravity; player.y += player.vy;
-  if(player.y>300) { player.y=300; player.vy=0; }
+  if (player.y > groundY - player.height) { player.y = groundY - player.height; player.vy = 0; }
 
   siren.vy += gravity; siren.y += siren.vy;
-  if(siren.y>300) { siren.y=300; siren.vy=0; }
+  if (siren.y > groundY - siren.height) { siren.y = groundY - siren.height; siren.vy = 0; }
 
+  // Spawns
   spawnObstacle();
-  if(Math.random()<0.02) coins.push({x:canvas.width,y:250,width:30,height:30});
+  if (Math.random() < 0.02) coins.push({ x: canvas.width, y: groundY - 100, width: 30, height: 30 });
 
-  obstacles.forEach(o=>o.x-=speed);
-  coins.forEach(c=>c.x-=speed);
+  // Movement
+  obstacles.forEach(o=>o.x -= speed);
+  coins.forEach(c=>c.x -= speed);
 
   // Collision with obstacles
   obstacles.forEach(o=>{
-    if(!o.hit &&
-       player.x < o.x + o.width - 10 &&
-       player.x + player.width - 10 > o.x + 10 &&
-       player.y < o.y + o.height - 10 &&
-       player.y + player.height - 10 > o.y + 10) {
+    if (!o.hit &&
+        player.x < o.x + o.width - 10 &&
+        player.x + player.width - 10 > o.x + 10 &&
+        player.y < o.y + o.height - 10 &&
+        player.y + player.height - 10 > o.y + 10) {
       o.hit = true;
       obstacleHits++;
 
@@ -171,18 +177,19 @@ function update() {
         sirenActive = true;
         siren.x = player.x - 250;
         warningFlash = 30;
-        sirenTimer = 600; // 10 seconds
+        sirenTimer = 600; // ~10s
       } else {
         gameOver();
       }
     }
   });
 
+  // Coins collect & cleanup
   coins = coins.filter(c=>{
-    if(player.x< c.x+c.width && player.x+player.width>c.x &&
-       player.y< c.y+c.height && player.y+player.height>c.y) {
+    if (player.x < c.x + c.width && player.x + player.width > c.x &&
+        player.y < c.y + c.height && player.y + player.height > c.y) {
       score++;
-      if(sfx.coin.play) sfx.coin.play();
+      if (sfx.coin.play) sfx.coin.play();
       return false;
     }
     return c.x + c.width > 0;
@@ -190,15 +197,15 @@ function update() {
 
   obstacles = obstacles.filter(o=>o.x + o.width > 0);
 
-  // Siren logic
+  // Siren behavior
   if (sirenActive) {
     if (sirenTimer > 0) {
       sirenTimer--;
       if (siren.x < player.x - 100) {
-        siren.x += 2;
+        siren.x += 2; // approach but keep gap
       }
     } else {
-      siren.x -= 3;
+      siren.x -= 3; // retreat
       if (siren.x < -200) {
         sirenActive = false;
         siren.x = -200;
@@ -214,44 +221,50 @@ function update() {
 function draw() {
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
+  // Background layers
   ctx.drawImage(img.bgFar, 0, 0, canvas.width, canvas.height);
   ctx.drawImage(img.bgMid, 0, 0, canvas.width, canvas.height);
   ctx.drawImage(img.sky,   0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img.ground,0,canvas.height-50,canvas.width,50);
 
-  ctx.drawImage(img.player,player.x,player.y,player.width,player.height);
-  ctx.drawImage(img.siren,siren.x,siren.y,siren.width,siren.height);
+  // Ground
+  ctx.drawImage(img.ground, 0, groundY, canvas.width, 50);
 
-  obstacles.forEach(o=>{
-    ctx.drawImage(img.obstacle,o.x,o.y,o.width,o.height);
-  });
+  // Entities
+  ctx.drawImage(img.player, player.x, player.y, player.width, player.height);
+  ctx.drawImage(img.siren,  siren.x,  siren.y,  siren.width,  siren.height);
 
-  coins.forEach(c=>ctx.drawImage(img.coin,c.x,c.y,c.width,c.height));
+  obstacles.forEach(o=>ctx.drawImage(img.obstacle, o.x, o.y, o.width, o.height));
+  coins.forEach(c=>ctx.drawImage(img.coin, c.x, c.y, c.width, c.height));
 
-  ctx.fillStyle="white"; ctx.font="20px Arial";
-  ctx.fillText("Score: "+score,10,30);
-  ctx.fillText("Hits: "+obstacleHits,10,60);
-  ctx.fillText("Speed: "+speed.toFixed(2),10,90);
+  // HUD
+  ctx.fillStyle = "white";
+  ctx.font = "20px Arial";
+  ctx.fillText("Score: " + score, 10, 30);
+  ctx.fillText("Hits: " + obstacleHits, 10, 60);
+  ctx.fillText("Speed: " + speed.toFixed(2), 10, 90);
 
+  // Siren warning flash
   if (sirenActive && warningFlash > 0) {
-    ctx.fillStyle = `rgba(255,0,0,${warningFlash/30})`;
-    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle = `rgba(255,0,0,${warningFlash / 30})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     warningFlash--;
   }
+
+  // Siren timer bar (below HUD)
   if (sirenActive && sirenTimer > 0) {
-    let barWidth = (sirenTimer / 600) * canvas.width;
+    const barWidth = (sirenTimer / 600) * canvas.width;
     ctx.fillStyle = "red";
-    ctx.fillRect(0, 0, barWidth, 10);
+    ctx.fillRect(0, 110, barWidth, 10);
   }
 }
 
 function gameOver() {
-  gameRunning=false;
-  if(sfx.sirenSong.pause) sfx.sirenSong.pause();
-  overlay.style.display="flex";
-  overlay.innerHTML="Game Over! Score: "+score+"<br><button id='restartBtn'>Restart</button>";
+  gameRunning = false;
+  if (sfx.sirenSong.pause) sfx.sirenSong.pause();
+  overlay.style.display = "flex";
+  overlay.innerHTML = "Game Over! Score: " + score + "<br><button id='restartBtn'>Restart</button>";
   document.getElementById("restartBtn").addEventListener("click", startGame);
 }
-</script>
+  </script>
 </body>
 </html>
