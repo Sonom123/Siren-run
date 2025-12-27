@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Siren Run Game</title>
+  <style>
+    body { margin:0; background:#000; overflow:hidden; }
+    canvas { display:block; margin:0 auto; background:#222; }
+    #overlay {
+      position:absolute; top:0; left:0; right:0; bottom:0;
+      display:flex; align-items:center; justify-content:center;
+      background:rgba(0,0,0,0.7); color:#fff; font-family:sans-serif;
+      font-size:24px; z-index:10; text-align:center;
+      flex-direction:column;
+    }
+    #overlay button {
+      padding:20px 40px; font-size:28px; margin-top:20px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="overlay">
+    Press Space or Tap to start
+    <button id="startBtn">Start</button>
+  </div>
+
+  <script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+const overlay = document.getElementById("overlay");
+const startBtn = document.getElementById("startBtn");
+
+// Responsive canvas
+function resizeCanvas() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight * 0.6;
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+// Load images
+const img = {
+  player: new Image(),
+  siren: new Image(),
+  obstacle: new Image(),
+  coin: new Image(),
+  bgFar: new Image(),
+  bgMid: new Image(),
+  ground: new Image(),
+  sky: new Image()
+};
+
+img.player.src   = "player.png";
+img.siren.src    = "siren.png";
+img.obstacle.src = "obstacle.png";
+img.coin.src     = "coin.png";
+img.bgFar.src    = "bg_far.png";
+img.bgMid.src    = "bg_mid.png";
+img.ground.src   = "ground.png";
+img.sky.src      = "sky.png";
+
+function safeAudio(src) {
+  try { return new Audio(src); }
+  catch { return { play:()=>{}, pause:()=>{}, paused:true }; }
+}
+
+const sfx = {
+  jump: safeAudio("jump.mp3"),
+  coin: safeAudio("coin.mp3"),
+  sirenSong: safeAudio("siren_song.mp3"),
+};
+
+// Game state
+let gameRunning = false;
+let score = 0;
+let player = { x:150, y:300, vy:0, width:50, height:50 };
+let siren = { x:-200, y:300, vy:0, width:50, height:50 };
+let obstacles = [];
+let coins = [];
+let gravity = 0.6;
+let obstacleHits = 0;
+let sirenActive = false;
+let warningFlash = 0;
+let sirenTimer = 0;
+
+// Speed control
+let baseSpeed = 5;
+let speed = baseSpeed;
+let speedIncrease = 0.0005;
+
+function startGame() {
+  overlay.style.display = "none";
+  gameRunning = true;
+  score = 0;
+  obstacleHits = 0;
+  sirenActive = false;
+  warningFlash = 0;
+  player.x = 150; player.y = 300; player.vy = 0;
+  siren.x = -200; siren.y = 300; siren.vy = 0;
+  speed = baseSpeed;
+  sfx.sirenSong.loop = true;
+  if(sfx.sirenSong.play) sfx.sirenSong.play().catch(()=>{});
+  requestAnimationFrame(update);
+}
+
+document.addEventListener("keydown", e=>{
+  if(e.code==="Space") { if(!gameRunning) startGame(); else jump(); }
+});
+canvas.addEventListener("click", ()=>{ if(!gameRunning) startGame(); else jump(); });
+// Touch controls
+canvas.addEventListener("touchstart", e=>{
+  e.preventDefault();
+  if(!gameRunning) startGame(); else jump();
+});
+startBtn.addEventListener("click", startGame);
+
+function jump() {
+  if(player.y>=300) {
+    player.vy = -10;
+    if(sfx.jump.play) sfx.jump.play();
+  }
+}
+
+function spawnObstacle() {
+  if (Math.random() < 0.05) {
+    let lastX = obstacles.length > 0 ? obstacles[obstacles.length - 1].x : 0;
+    if (obstacles.length === 0 || lastX < canvas.width - (40 * 5)) {
+      let count = Math.random() < 0.3 ? 2 : 1;
+      for (let i = 0; i < count; i++) {
+        obstacles.push({
+          x: canvas.width + i * 30,
+          y: 310,
+          width: 40,
+          height: 40,
+          hit: false
+        });
+      }
+    }
+  }
+}
+
+function update() {
+  if(!gameRunning) return;
+
+  speed += speedIncrease;
+
+  player.vy += gravity; player.y += player.vy;
+  if(player.y>300) { player.y=300; player.vy=0; }
+
+  siren.vy += gravity; siren.y += siren.vy;
+  if(siren.y>300) { siren.y=300; siren.vy=0; }
+
+  spawnObstacle();
+  if(Math.random()<0.02) coins.push({x:canvas.width,y:250,width:30,height:30});
+
+  obstacles.forEach(o=>o.x-=speed);
+  coins.forEach(c=>c.x-=speed);
+
+  // Collision with obstacles
+  obstacles.forEach(o=>{
+    if(!o.hit &&
+       player.x < o.x + o.width - 10 &&
+       player.x + player.width - 10 > o.x + 10 &&
+       player.y < o.y + o.height - 10 &&
+       player.y + player.height - 10 > o.y + 10) {
+      o.hit = true;
+      obstacleHits++;
+
+      if (!sirenActive) {
+        sirenActive = true;
+        siren.x = player.x - 250;
+        warningFlash = 30;
+        sirenTimer = 600; // 10 seconds
+      } else {
+        gameOver();
+      }
+    }
+  });
+
+  coins = coins.filter(c=>{
+    if(player.x< c.x+c.width && player.x+player.width>c.x &&
+       player.y< c.y+c.height && player.y+player.height>c.y) {
+      score++;
+      if(sfx.coin.play) sfx.coin.play();
+      return false;
+    }
+    return c.x + c.width > 0;
+  });
+
+  obstacles = obstacles.filter(o=>o.x + o.width > 0);
+
+  // Siren logic
+  if (sirenActive) {
+    if (sirenTimer > 0) {
+      sirenTimer--;
+      if (siren.x < player.x - 100) {
+        siren.x += 2;
+      }
+    } else {
+      siren.x -= 3;
+      if (siren.x < -200) {
+        sirenActive = false;
+        siren.x = -200;
+        obstacleHits = 0;
+      }
+    }
+  }
+
+  draw();
+  requestAnimationFrame(update);
+}
+
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  ctx.drawImage(img.bgFar, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img.bgMid, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img.sky,   0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img.ground,0,canvas.height-50,canvas.width,50);
+
+  ctx.drawImage(img.player,player.x,player.y,player.width,player.height);
+  ctx.drawImage(img.siren,siren.x,siren.y,siren.width,siren.height);
+
+  obstacles.forEach(o=>{
+    ctx.drawImage(img.obstacle,o.x,o.y,o.width,o.height);
+  });
+
+  coins.forEach(c=>ctx.drawImage(img.coin,c.x,c.y,c.width,c.height));
+
+  ctx.fillStyle="white"; ctx.font="20px Arial";
+  ctx.fillText("Score: "+score,10,30);
+  ctx.fillText("Hits: "+obstacleHits,10,60);
+  ctx.fillText("Speed: "+speed.toFixed(2),10,90);
+
+  if (sirenActive && warningFlash > 0) {
+    ctx.fillStyle = `rgba(255,0,0,${warningFlash/30})`;
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    warningFlash--;
+  }
+  if (sirenActive && sirenTimer > 0) {
+    let barWidth = (sirenTimer / 600) * canvas.width;
+    ctx.fillStyle = "red";
+    ctx.fillRect(0, 0, barWidth, 10);
+  }
+}
+
+function gameOver() {
+  gameRunning=false;
+  if(sfx.sirenSong.pause) sfx.sirenSong.pause();
+  overlay.style.display="flex";
+  overlay.innerHTML="Game Over! Score: "+score+"<br><button id='restartBtn'>Restart</button>";
+  document.getElementById("restartBtn").addEventListener("click", startGame);
+}
+</script>
+</body>
+</html>
